@@ -7,6 +7,9 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Teams from './pages/Teams';
 import GlobalSchedule from './pages/GlobalSchedule';
+import AdminManagement from './pages/AdminManagement';
+import AttendanceHistory from './pages/AttendanceHistory';
+import Profile from './pages/Profile';
 
 // Protected Route Wrapper
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -42,6 +45,24 @@ const AppRoutes = () => {
         </ProtectedRoute>
       } />
 
+      <Route path="/attendance" element={
+        <ProtectedRoute>
+          <AttendanceHistory />
+        </ProtectedRoute>
+      } />
+
+      <Route path="/admin" element={
+        <ProtectedRoute>
+          <AdminManagement />
+        </ProtectedRoute>
+      } />
+
+      <Route path="/profile" element={
+        <ProtectedRoute>
+          <Profile />
+        </ProtectedRoute>
+      } />
+
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
   );
@@ -49,13 +70,13 @@ const AppRoutes = () => {
 
 const App: React.FC = () => {
   return (
-    <AuthProvider>
-      <DataProvider>
+    <DataProvider>
+      <AuthProvider>
         <Router>
           <AppRoutes />
         </Router>
-      </DataProvider>
-    </AuthProvider>
+      </AuthProvider>
+    </DataProvider>
   );
 };
 

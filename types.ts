@@ -14,9 +14,12 @@ export enum TeamCategory {
 export interface User {
   id: string;
   name: string;
+  username: string;
+  password?: string; // For mock login purposes
   role: UserRole;
   assignedTeamId?: string; // For coaches
-  linkedPlayerId?: string; // For parents
+  linkedPlayerId?: string; // Legacy field
+  linkedPlayerIds?: string[]; // New: support for multiple students
   avatarUrl?: string;
 }
 
@@ -27,6 +30,7 @@ export interface Team {
   coachName: string;
   coachJoinedDate?: string; // ISO Date string
   icon: string;
+  imageUrl?: string; // Support for custom images
   nextPractice?: string;
 }
 
@@ -47,7 +51,8 @@ export interface Player {
 
   medicalNotes?: string;
   attendanceRate: number; // 0-100
-  status: 'Active' | 'Injured' | 'Inactive';
+  status: 'Active' | 'Medical' | 'Inactive';
+  avatarUrl?: string; // Support for player images
 }
 
 export interface AttendanceRecord {
@@ -55,7 +60,7 @@ export interface AttendanceRecord {
   playerId: string;
   teamId: string;
   date: string; // ISO Date string
-  status: 'Present' | 'Absent' | 'Late' | 'Excused';
+  status: 'Present' | 'Absent' | 'Medical' | 'Other';
 }
 
 export interface ScheduleEvent {
@@ -67,6 +72,7 @@ export interface ScheduleEvent {
   endTime: string;
   location: string;
   type: 'Practice' | 'Match' | 'Meeting';
+  note?: string; // Added note field for training details
 }
 
 export interface DashboardStats {

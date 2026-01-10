@@ -2,7 +2,8 @@ import React, { useState, useRef } from 'react';
 import { useData } from '../contexts/DataContext';
 import { useAuth } from '../contexts/AuthContext';
 import { UserRole } from '../types';
-import { ArrowLeft, Calendar, UserCheck, ClipboardList, Settings, Download, Upload, FileSpreadsheet, Save, X } from 'lucide-react';
+// Added missing Users import from lucide-react
+import { ArrowLeft, Calendar, UserCheck, ClipboardList, Settings, Download, Upload, Trash2, Save, X, AlertTriangle, Users, Camera } from 'lucide-react';
 import PlayerList from '../components/PlayerList';
 import AttendanceTaker from '../components/AttendanceTaker';
 import ScheduleView from '../components/ScheduleView';
@@ -13,7 +14,7 @@ interface TeamDetailProps {
 }
 
 const TeamDetail: React.FC<TeamDetailProps> = ({ teamId, onBack }) => {
-  const { teams, getPlayersByTeam, updateTeam } = useData();
+  const { teams, getPlayersByTeam, updateTeam, deleteTeam } = useData();
   const { user } = useAuth();
   const team = teams.find(t => t.id === teamId);
   const players = getPlayersByTeam(teamId);
@@ -21,23 +22,34 @@ const TeamDetail: React.FC<TeamDetailProps> = ({ teamId, onBack }) => {
   const [activeTab, setActiveTab] = useState<'roster' | 'schedule'>('roster');
   const [showAttendance, setShowAttendance] = useState(false);
   const [showEditTeamModal, setShowEditTeamModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Form state for Team Editing
   const [editCoachName, setEditCoachName] = useState('');
   const [editCoachDate, setEditCoachDate] = useState('');
+  const [editImageUrl, setEditImageUrl] = useState('');
 
   if (!team) return <div>Team not found</div>;
 
-  const isCoach = user?.role === UserRole.COACH && user.assignedTeamId === teamId;
-  const isManagement = user?.role === UserRole.PRINCIPAL || user?.role === UserRole.MASTER_IN_CHARGE || user?.role === UserRole.ADMIN;
+  // Admin and Master In-Charge have full management access.
+  const isAdmin = user?.role === UserRole.ADMIN;
+  const isMIC = user?.role === UserRole.MASTER_IN_CHARGE;
+  const isPrincipal = user?.role === UserRole.PRINCIPAL;
   
-  // Specific permission for editing details (Admin/MIC only as per request)
-  const canEditDetails = user?.role === UserRole.ADMIN || user?.role === UserRole.MASTER_IN_CHARGE;
+  const isManagement = isPrincipal || isMIC || isAdmin;
+  const isMyTeam = user?.role === UserRole.COACH && user.assignedTeamId === teamId;
+  
+  // Can mark attendance if assigned coach OR management/admin
+  const canMarkAttendance = isMyTeam || isManagement;
+  
+  // Can edit team details or delete (Admin/MIC only)
+  const canModifyTeam = isAdmin || isMIC;
 
   const handleOpenEditTeam = () => {
     setEditCoachName(team.coachName);
     setEditCoachDate(team.coachJoinedDate || '');
+    setEditImageUrl(team.imageUrl || '');
     setShowEditTeamModal(true);
   };
 
@@ -46,91 +58,146 @@ const TeamDetail: React.FC<TeamDetailProps> = ({ teamId, onBack }) => {
     updateTeam({
       ...team,
       coachName: editCoachName,
-      coachJoinedDate: editCoachDate
+      coachJoinedDate: editCoachDate,
+      imageUrl: editImageUrl
     });
     setShowEditTeamModal(false);
   };
 
+  const handleDeleteTeam = () => {
+    deleteTeam(teamId);
+    onBack();
+  };
+
+  const handleImageUpload = (setter: (url: string) => void) => {
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/*';
+    fileInput.onchange = (e: any) => {
+      const file = e.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setter(reader.result as string);
+        };
+        reader.readAsDataURL(file);
+      }
+    };
+    fileInput.click();
+  };
+
   const handleExportData = () => {
-    // Generate CSV Content
     const headers = ['Player Name', 'Grade', 'Position', 'Joined Date', 'Parent Contact', 'Attendance Rate %', 'Status'];
-    const rows = players.map(p => [
-      p.name,
-      p.grade,
-      p.position,
-      p.joinedDate,
-      p.contactParent,
-      p.attendanceRate.toString(),
-      p.status
-    ]);
-
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.join(','))
-    ].join('\n');
-
+    const rows = players.map(p => [p.name, p.grade, p.position, p.joinedDate, p.contactParent, p.attendanceRate.toString(), p.status]);
+    const csvContent = [headers.join(','), ...rows.map(row => row.join(','))].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `${team.name}_Roster_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `${team.name}_Roster.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  const handleImportClick = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      // In a real app, parse the file here. For demo:
-      alert(`Successfully uploaded: ${file.name}. (Simulation: Data merged)`);
-      event.target.value = ''; // Reset
-    }
-  };
-
   return (
     <div className="space-y-6">
-      {/* Attendance Modal Overlay */}
       {showAttendance && (
         <AttendanceTaker teamId={teamId} onClose={() => setShowAttendance(false)} />
       )}
 
-      {/* Team Editing Modal */}
+      {/* Team Delete Confirmation */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/80 backdrop-blur-md px-4">
+          <div className="bg-white rounded-3xl p-8 w-full max-w-sm shadow-2xl text-center">
+            <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+              <AlertTriangle size={32} />
+            </div>
+            <h3 className="text-xl font-black text-slate-800 mb-2">Delete {team.name}?</h3>
+            <p className="text-slate-500 mb-8 text-sm leading-relaxed">
+              This will permanently remove the team, its roster, and its coach login. This action cannot be undone.
+            </p>
+            <div className="flex flex-col gap-3">
+              <button 
+                onClick={handleDeleteTeam}
+                className="w-full py-4 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition"
+              >
+                Yes, Delete Team
+              </button>
+              <button 
+                onClick={() => setShowDeleteConfirm(false)}
+                className="w-full py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Team Modal */}
       {showEditTeamModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 px-4">
-           <div className="bg-white rounded-lg p-6 w-full max-w-md">
-             <div className="flex justify-between items-center mb-4">
-               <h3 className="text-xl font-bold">Edit Team Details</h3>
-               <button onClick={() => setShowEditTeamModal(false)}><X size={24} className="text-slate-400" /></button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm px-4">
+           <div className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl">
+             <div className="flex justify-between items-center mb-6">
+               <h3 className="text-2xl font-black text-slate-800">Team Settings</h3>
+               <button onClick={() => setShowEditTeamModal(false)} className="text-slate-400 hover:text-slate-600 p-2 hover:bg-slate-100 rounded-full transition"><X size={24} /></button>
              </div>
-             <form onSubmit={handleSaveTeam} className="space-y-4">
-                <div>
-                   <label className="block text-sm font-medium text-slate-700">Coach Name</label>
-                   <input 
-                      type="text" 
-                      value={editCoachName}
-                      onChange={(e) => setEditCoachName(e.target.value)}
-                      className="mt-1 block w-full rounded-md border-slate-300 shadow-sm border p-2"
-                      required
-                   />
+             <form onSubmit={handleSaveTeam} className="space-y-6">
+                <div className="flex justify-center">
+                   <div className="relative group">
+                     <div className="w-24 h-24 rounded-3xl bg-slate-50 border-2 border-dashed border-slate-200 flex items-center justify-center overflow-hidden">
+                        {editImageUrl ? (
+                          <img src={editImageUrl} className="w-full h-full object-cover" alt="" />
+                        ) : (
+                          <span className="text-4xl">{team.icon}</span>
+                        )}
+                     </div>
+                     <button 
+                       type="button" 
+                       onClick={() => handleImageUpload((url) => setEditImageUrl(url))}
+                       className="absolute -bottom-2 -right-2 p-2 bg-emerald-600 text-white rounded-xl shadow-lg hover:bg-emerald-700 transition"
+                     >
+                       <Camera size={18} />
+                     </button>
+                   </div>
                 </div>
-                <div>
-                   <label className="block text-sm font-medium text-slate-700">Coach Joined Date</label>
-                   <input 
-                      type="date" 
-                      value={editCoachDate}
-                      onChange={(e) => setEditCoachDate(e.target.value)}
-                      className="mt-1 block w-full rounded-md border-slate-300 shadow-sm border p-2"
-                   />
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-bold text-slate-600 mb-1 uppercase tracking-wide">Coach Title/Name</label>
+                    <input 
+                        type="text" 
+                        value={editCoachName}
+                        onChange={(e) => setEditCoachName(e.target.value)}
+                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 outline-none transition font-semibold"
+                        required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-600 mb-1 uppercase tracking-wide">Coach Joined Date</label>
+                    <input 
+                        type="date" 
+                        value={editCoachDate}
+                        onChange={(e) => setEditCoachDate(e.target.value)}
+                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 outline-none transition font-semibold"
+                    />
+                  </div>
                 </div>
-                <div className="flex justify-end pt-4">
-                   <button type="submit" className="flex items-center px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700">
-                     <Save size={18} className="mr-2" /> Save Changes
+
+                <div className="pt-4 flex flex-col gap-3">
+                   <button type="submit" className="w-full py-4 bg-emerald-600 text-white rounded-xl font-bold shadow-xl hover:bg-emerald-700 transition">
+                     Update Details
                    </button>
+                   {isAdmin && (
+                     <button 
+                       type="button" 
+                       onClick={() => { setShowEditTeamModal(false); setShowDeleteConfirm(true); }}
+                       className="w-full py-3 bg-red-50 text-red-600 rounded-xl font-bold hover:bg-red-100 transition flex items-center justify-center"
+                     >
+                       <Trash2 size={18} className="mr-2" /> Delete Entire Team
+                     </button>
+                   )}
                 </div>
              </form>
            </div>
@@ -138,99 +205,92 @@ const TeamDetail: React.FC<TeamDetailProps> = ({ teamId, onBack }) => {
       )}
 
       {/* Header */}
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6">
-          <div className="flex items-center mb-4 md:mb-0">
+      <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+          <div className="flex items-center">
             <button 
               onClick={onBack}
-              className="mr-4 p-2 rounded-full hover:bg-slate-100 transition"
+              className="mr-6 p-3 rounded-2xl hover:bg-slate-100 text-slate-600 transition bg-slate-50 border border-slate-100"
             >
-              <ArrowLeft size={20} />
+              <ArrowLeft size={24} />
             </button>
-            <div>
-              <div className="flex items-center space-x-2">
-                <span className="text-3xl">{team.icon}</span>
-                <h1 className="text-2xl font-bold text-slate-900">{team.name}</h1>
+            <div className="flex items-center gap-4">
+              <div className="w-24 h-24 bg-slate-50 flex items-center justify-center rounded-3xl border border-slate-100 overflow-hidden">
+                {team.imageUrl ? (
+                  <img src={team.imageUrl} className="w-full h-full object-cover" alt="" />
+                ) : (
+                  <span className="text-5xl">{team.icon}</span>
+                )}
               </div>
-              <div className="flex flex-col text-sm text-slate-500 mt-1">
-                 <span>Coach: <span className="font-medium text-slate-700">{team.coachName}</span></span>
-                 {team.coachJoinedDate && <span>Joined: {new Date(team.coachJoinedDate).toLocaleDateString()}</span>}
+              <div>
+                <h1 className="text-3xl font-black text-slate-900 tracking-tight">{team.name}</h1>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500 mt-1">
+                   <span className="flex items-center"><Users size={16} className="mr-2 text-slate-400"/> Coach: <span className="font-bold text-slate-800 ml-1">{team.coachName}</span></span>
+                   {team.coachJoinedDate && <span>• Started {new Date(team.coachJoinedDate).toLocaleDateString()}</span>}
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="flex space-x-2">
-            {(isCoach || isManagement) && (
+          <div className="flex w-full md:w-auto gap-3">
+            {canMarkAttendance && (
                 <button 
                   onClick={() => setShowAttendance(true)}
-                  className="flex items-center px-4 py-2 bg-slate-900 text-white font-semibold rounded-lg hover:bg-slate-800 transition shadow-sm"
+                  className="flex-1 md:flex-none flex items-center justify-center px-6 py-4 bg-slate-900 text-white font-bold rounded-2xl hover:bg-slate-800 transition shadow-xl"
                 >
-                  <UserCheck size={18} className="mr-2" />
+                  <UserCheck size={20} className="mr-2" />
                   Mark Attendance
                 </button>
+            )}
+            {canModifyTeam && (
+              <button 
+                onClick={handleOpenEditTeam}
+                className="p-4 bg-white text-slate-600 border border-slate-200 rounded-2xl hover:bg-slate-50 transition"
+                title="Settings"
+              >
+                <Settings size={20} />
+              </button>
             )}
           </div>
         </div>
 
-        {/* Management Controls for Admin/MIC */}
-        {canEditDetails && (
-          <div className="pt-4 border-t border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-3">
-             <button 
-               onClick={handleOpenEditTeam}
-               className="flex items-center justify-center px-3 py-2 bg-slate-100 text-slate-700 text-sm font-medium rounded hover:bg-slate-200 border border-slate-200"
-             >
-               <Settings size={16} className="mr-2" /> Edit Coach Details
-             </button>
+        {canModifyTeam && (
+          <div className="mt-8 pt-6 border-t border-slate-100 flex flex-wrap gap-3">
              <button 
                onClick={handleExportData}
-               className="flex items-center justify-center px-3 py-2 bg-emerald-50 text-emerald-700 text-sm font-medium rounded hover:bg-emerald-100 border border-emerald-200"
+               className="flex items-center px-4 py-2.5 bg-emerald-50 text-emerald-700 text-sm font-bold rounded-xl hover:bg-emerald-100 border border-emerald-100 transition"
              >
-               <Download size={16} className="mr-2" /> Download Excel/CSV
+               <Download size={18} className="mr-2" /> Download Roster
              </button>
              <button 
-               onClick={handleImportClick}
-               className="flex items-center justify-center px-3 py-2 bg-blue-50 text-blue-700 text-sm font-medium rounded hover:bg-blue-100 border border-blue-200"
+               onClick={() => fileInputRef.current?.click()}
+               className="flex items-center px-4 py-2.5 bg-blue-50 text-blue-700 text-sm font-bold rounded-xl hover:bg-blue-100 border border-blue-100 transition"
              >
-               <Upload size={16} className="mr-2" /> Upload Excel Sheet
+               <Upload size={18} className="mr-2" /> Import Data
              </button>
-             {/* Hidden Input for File Upload */}
-             <input 
-               type="file" 
-               ref={fileInputRef} 
-               onChange={handleFileChange} 
-               accept=".csv, .xlsx, .xls"
-               className="hidden"
-             />
+             <input type="file" ref={fileInputRef} onChange={(e) => alert('Upload logic simulation complete.')} accept=".csv" className="hidden" />
           </div>
         )}
       </div>
 
       {/* Tabs */}
-      <div className="border-b border-slate-200">
-        <nav className="flex space-x-8">
-          <button
-            onClick={() => setActiveTab('roster')}
-            className={`
-              pb-4 px-1 border-b-2 font-medium text-sm flex items-center
-              ${activeTab === 'roster' 
-                ? 'border-emerald-500 text-emerald-600' 
-                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'}
-            `}
-          >
-            <ClipboardList size={16} className="mr-2" /> Roster
-          </button>
-          <button
-            onClick={() => setActiveTab('schedule')}
-            className={`
-              pb-4 px-1 border-b-2 font-medium text-sm flex items-center
-              ${activeTab === 'schedule' 
-                ? 'border-emerald-500 text-emerald-600' 
-                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'}
-            `}
-          >
-            <Calendar size={16} className="mr-2" /> Schedule
-          </button>
-        </nav>
+      <div className="flex space-x-2 bg-white p-1.5 rounded-2xl border border-slate-200 self-start w-fit">
+        <button
+          onClick={() => setActiveTab('roster')}
+          className={`px-8 py-3 rounded-xl font-bold text-sm transition-all ${
+            activeTab === 'roster' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'
+          }`}
+        >
+          Roster
+        </button>
+        <button
+          onClick={() => setActiveTab('schedule')}
+          className={`px-8 py-3 rounded-xl font-bold text-sm transition-all ${
+            activeTab === 'schedule' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'
+          }`}
+        >
+          Schedule
+        </button>
       </div>
 
       {/* Content */}
